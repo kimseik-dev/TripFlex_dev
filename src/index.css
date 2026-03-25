@@ -1,0 +1,166 @@
+:root {
+  --app-width: 390px;
+  --app-height: 844px;
+  --bg-dark: #121212;
+  --accent-yellow: #FFE600;
+  --text-primary: #ffffff;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+/* App Container (Fixed Mobile Size) */
+.app-container {
+  width: var(--app-width);
+  height: var(--app-height);
+  background-color: var(--bg-dark);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 40px rgba(255, 230, 0, 0.1);
+  border-radius: 30px;
+  overflow: hidden;
+  border: 1px solid #333;
+}
+
+/* Header */
+.app-header {
+  height: 60px;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* 로고와 상태 메시지를 양옆으로 */
+  padding: 0 20px;
+  z-index: 10;
+}
+
+.status-indicator {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent-yellow);
+  background: rgba(255, 230, 0, 0.1);
+  padding: 4px 10px;
+  border-radius: 20px;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.app-logo {
+  color: var(--accent-yellow);
+  font-weight: bold;
+  font-size: 1.2rem;
+  letter-spacing: 1px;
+}
+
+/* Main Content Area */
+.main-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #1a1a1a;
+}
+
+.viewfinder-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center; /* Center vertically */
+  justify-content: center; /* Center horizontally */
+  background-color: #000;
+}
+
+.scanner-image {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  z-index: 1;
+}
+
+/* Translation Overlay */
+.overlay-bubble {
+  position: absolute;
+  background: rgba(255, 235, 59, 0.9);
+  color: #000;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  pointer-events: none;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+/* Bottom Navigation */
+.bottom-nav {
+  height: 80px;
+  background-color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding-bottom: 10px;
+  z-index: 10;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #666;
+  font-size: 0.7rem;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.nav-item.active {
+  color: var(--accent-yellow);
+}
+
+.scan-button {
+  width: 60px;
+  height: 60px;
+  background-color: var(--accent-yellow);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  box-shadow: 0 4px 15px rgba(255, 230, 0, 0.3);
+  transform: translateY(-10px);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.scan-button.scanning {
+  animation: spin 2s infinite linear;
+  box-shadow: 0 0 20px rgba(255, 230, 0, 0.6);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg) translateY(-10px); }
+  to { transform: rotate(360deg) translateY(-10px); }
+}
