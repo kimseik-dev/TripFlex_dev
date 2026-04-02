@@ -190,7 +190,7 @@ export default function Home() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={feature.action}
-              className={`bg-black/20 backdrop-blur-md rounded-3xl p-4 flex flex-col items-center justify-center gap-3 border border-white/5 ${feature.action ? 'cursor-pointer hover:bg-white/5' : ''}`}
+              className="bg-black/20 backdrop-blur-md rounded-3xl p-4 flex flex-col items-center justify-center gap-3 border border-white/5 cursor-pointer hover:bg-white/5"
             >
               <feature.icon className={`w-8 h-8 ${feature.color}`} />
               <span className="text-white font-medium text-sm">{feature.label}</span>

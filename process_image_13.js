@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 async function processImage13() {
-    const relayUrl = 'http://api.ontwo.co.kr:3000/api/relay';
+    const relayUrl = 'http://3.36.126.196:3000/api/relay';
     const bearerToken = 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJiYWNrZW5kIiwiYXV0aCI6WyJST0xFX0JBQ0tFTkQiXSwiaWF0IjoxNzY3MzQyMDgyLCJleHAiOjE3Njc0Mjg0ODJ9.ly-U2_gd0otXT5IkbsWSjeA6s0-F4gRICV94JkuEXcw';
     const ocrPath = 'c:/Mayoube/TripFlex/ocr_jp_13.json';
     const imagePath = 'c:/Mayoube/TripFlex/샘플이미지/JP(JAPAN)/JP_image_013.jpg';

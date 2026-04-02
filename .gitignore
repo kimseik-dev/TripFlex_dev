@@ -7,12 +7,30 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+.next/
+.turbo/
+out/
+tsconfig.tsbuildinfo
+
+# Environment variables
 .env
-.env.local
-*.local
+.env.*
+!.env.example
+
+# OCR temp files
+ocr_*.json
+translated_*.json
+jp_ocr_result.json
+request.json
+temp_response.json
+overlay_*.html
 
 # Editor directories and files
 .vscode/*

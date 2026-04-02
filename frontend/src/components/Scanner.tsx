@@ -1,287 +1,436 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera as CameraIcon, X, Loader2, Image as ImageIcon, RotateCcw } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { logger } from '@/lib/logger';
+import { 
+  Camera, 
+  RotateCw, 
+  X, 
+  Zap,
+  RefreshCw,
+  Maximize2,
+  Image as ImageIcon
+} from 'lucide-react';
+import { TranslationItem } from './scanner/TranslationItem';
+import { calculatePushedTop, getProportionalFontSize } from '@/utils/scanner/layoutEngine';
+import { extractDominantColors, ColorResult } from '@/utils/scanner/colorEngine';
+
+/**
+ * Scanner Component ✨
+ * v118: 가독성 끝판왕! 지능형 배치 시스템 도입! 📸🕵️‍♀️🎨🌈🧼🧱
+ */
 
 interface ScannerProps {
   onClose: () => void;
 }
 
 export default function Scanner({ onClose }: ScannerProps) {
+  const [imgSrc, setImgSrc] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [imgDimensions, setImgDimensions] = useState<{width: number, height: number} | null>(null);
+  const [colorMap, setColorMap] = useState<{ [key: number]: ColorResult }>({});
+  const [showOverlays, setShowOverlays] = useState(false);
+  const [isFlashActive, setIsFlashActive] = useState(false);
+  
+  const imgRef = useRef<HTMLImageElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [imgAspectRatio, setImgAspectRatio] = useState<number>(3/4); // Default aspect ratio
-  const [results, setResults] = useState<any[]>([]);
-  const [isScanning, setIsScanning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [provider, setProvider] = useState<'azure' | 'google'>('azure'); // v49 Multi-Engine
+  const [overlayStyle, setOverlayStyle] = useState<React.CSSProperties & { renderedW?: number, renderedH?: number }>({ inset: 0 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Initialize Camera
   useEffect(() => {
-    if (!capturedImage) {
-      startCamera();
-    }
-    return () => stopCamera();
-  }, [capturedImage]);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+    if (isCapturing && videoRef.current) {
+      navigator.mediaDevices.getUserMedia({ 
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
-      });
-      if (videoRef.current) videoRef.current.srcObject = stream;
-    } catch (err) {
-      setError("카메라를 시작할 수 없어요! 권한을 확인해주세요.");
-      logger.error("Camera Error:", err);
+      })
+      .then(stream => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      })
+      .catch(err => console.error("Camera access failed:", err));
     }
+    
+    return () => {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isCapturing]);
+
+  const runColorExtraction = (imageElement: HTMLImageElement, ocrResults: any[]) => {
+    if (!canvasRef.current) return;
+    const canvas = canvasRef.current;
+    canvas.width = imageElement.naturalWidth;
+    canvas.height = imageElement.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(imageElement, 0, 0);
+    
+    const newColorMap: { [key: number]: ColorResult } = {};
+    ocrResults.forEach((res, idx) => {
+      // v200: 절대 픽셀 기반 bbox를 [x, y, w, h] 형식으로 변환하여 색상 추출 🎨✨
+      const [cx, cy, w, h] = res.bbox;
+      const x = cx - w / 2;
+      const y = cy - h / 2;
+      newColorMap[idx] = extractDominantColors(canvas, [x, y, w, h]);
+    });
+    setColorMap(newColorMap);
   };
 
-  const stopCamera = () => {
-    const stream = videoRef.current?.srcObject as MediaStream;
-    stream?.getTracks().forEach(track => track.stop());
+  // v300: 클라이언트 사이드 이미지 압축 및 리사이징 로직 추가 📸🕵️‍♀️✨
+  // 이미지가 너무 크면 'Failed to fetch' 에러가 날 수 있으므로, 전송 전에 최적화합니다.
+  const compressImage = (dataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX_WIDTH = 1280;
+        const MAX_HEIGHT = 1280;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // v300: JPEG 0.8 퀄리티로 압축하여 전성 효율 극대화! 🚀
+        const compressed = canvas.toDataURL('image/jpeg', 0.8);
+        console.log(`v300 Optimized: ${(dataUrl.length / 1024).toFixed(1)}KB -> ${(compressed.length / 1024).toFixed(1)}KB ✨`);
+        resolve(compressed);
+      };
+      img.src = dataUrl;
+    });
   };
 
-  const captureAndScan = async () => {
+  const captureImage = async () => {
     if (!videoRef.current) return;
     
-    setIsScanning(true);
-    setError(null);
+    setIsFlashActive(true);
+    setTimeout(() => setIsFlashActive(false), 150);
 
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     const ctx = canvas.getContext('2d');
-    ctx?.drawImage(videoRef.current, 0, 0);
-    
-    const imageData = canvas.toDataURL('image/jpeg', 0.85);
-    setCapturedImage(imageData);
-    stopCamera();
-    
-    await processImage(imageData);
+    if (ctx) {
+      ctx.drawImage(videoRef.current, 0, 0);
+      const rawDataUrl = canvas.toDataURL('image/jpeg');
+      
+      // v300: 촬영 즉시 압축 엔진 가동! 🕵️‍♀️💨
+      const optimizedDataUrl = await compressImage(rawDataUrl);
+      setImgSrc(optimizedDataUrl);
+      setIsCapturing(false);
+      processImage(optimizedDataUrl);
+    }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const processImage = async (dataUrl: string) => {
+    setIsProcessing(true);
+    try {
+      const response = await fetch('/api/relay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl, country: 'JP' })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `서버 응답 에러: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const ocrResults = data.results || [];
+      setResults(ocrResults);
+      setImgDimensions({ width: data.imgWidth, height: data.imgHeight });
+      
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        runColorExtraction(tempImg, ocrResults);
+        setShowOverlays(true);
+      };
+      tempImg.src = dataUrl;
+    } catch (err: any) {
+      console.error("Scan failed:", err);
+      // v300: 사용자에게 더 친절한 에러 메시지 노출 💖
+      alert(`번역 중 에러가 발생했어요: ${err.message || "알 수 없는 에러"}\n이미지가 너무 크거나 서버 연결이 불안정할 수 있습니다.`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // v272: 'Perfect Fit' object-contain scaling engine 🕵️‍♀️📏✨
+  // 브라우저의 object-contain 알고리즘과 1:1로 일치하는 계산식을 사용하여 오차를 원천 차단합니다.
+  const calculateOverlayRect = () => {
+    if (!imgRef.current || !containerRef.current) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    const containerRect = containerRef.current.getBoundingClientRect();
+
+    const nw = imgRef.current.naturalWidth || (imgDimensions?.width || 1000);
+    const nh = imgRef.current.naturalHeight || (imgDimensions?.height || 1000);
+    const cw = rect.width;
+    const ch = rect.height;
+
+    const scale = Math.min(cw / nw, ch / nh);
+    const width = nw * scale;
+    const height = nh * scale;
+    const x = (cw - width) / 2;
+    const y = (ch - height) / 2;
+
+    const overlayLeft = (rect.left - containerRect.left) + x;
+    const overlayTop = (rect.top - containerRect.top) + y;
+
+    setOverlayStyle({
+      position: 'absolute',
+      width: `${width}px`,
+      height: `${height}px`,
+      top: `${overlayTop}px`,
+      left: `${overlayLeft}px`,
+      pointerEvents: 'none',
+      zIndex: 20,
+      renderedW: width,
+      renderedH: height,
+      overflow: 'visible' // v273: 하단 텍스트 누락 방지를 위한 안전장치 ✨
+    });
+    
+    console.log(`v272 Sync: Box[${Math.round(width)}x${Math.round(height)}] @ (${Math.round(overlayLeft)}, ${Math.round(overlayTop)}) | Scale: ${scale.toFixed(4)}`);
+  };
+
+  useEffect(() => {
+    if (!isCapturing && imgSrc) {
+      window.addEventListener('resize', calculateOverlayRect);
+      const timer = setTimeout(calculateOverlayRect, 150);
+      return () => {
+        window.removeEventListener('resize', calculateOverlayRect);
+        clearTimeout(timer);
+      };
+    }
+  }, [isCapturing, imgSrc]);
+
+  const resetScanner = () => {
+    setImgSrc(null);
+    setResults([]);
+    setImgDimensions(null);
+    setColorMap({});
+    setShowOverlays(false);
+    setIsCapturing(true);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = async (e) => {
-        const imageData = e.target?.result as string;
-        setCapturedImage(imageData);
-        await processImage(imageData);
+      reader.onload = async (event) => {
+        const dataUrl = event.target?.result as string;
+        
+        // v300: 업로드한 파일도 압축 엔진 가동! 📂🕵️‍♀️💨
+        const optimizedDataUrl = await compressImage(dataUrl);
+        setImgSrc(optimizedDataUrl);
+        setIsCapturing(false);
+        processImage(optimizedDataUrl);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const processImage = async (imageData: string) => {
-    setIsScanning(true);
-    try {
-      logger.api(`OCR & 번역 요청 시작... (Provider: ${provider})`);
-      const response = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageData, provider }) // Pass provider (v49)
-      });
-
-      if (!response.ok) throw new Error("분석에 실패했어요.");
-      
-      const data = await response.json();
-      logger.success("분석 데이터 수신됨!", { items: data.results?.length });
-      
-      if (data.aspectRatio) {
-        setImgAspectRatio(data.aspectRatio);
-      }
-      
-      // Log coordinates for transparency
-      if (data.results?.length > 0) {
-        logger.info("첫 번째 항목 보정 좌표:", data.results[0].boundingBox);
-      }
-      
-      setResults(data.results || []);
-    } catch (err: any) {
-      setError(err.message);
-      logger.error("Scan Process Error:", err);
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
-  const resetScanner = () => {
-    setCapturedImage(null);
-    setResults([]);
-    setError(null);
-  };
+  const triggerFileSelect = () => fileInputRef.current?.click();
 
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 50 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 20 }}
-      className="fixed inset-0 z-[100] flex flex-col bg-black lg:inset-y-4 lg:inset-x-[30%] lg:rounded-[3rem] lg:border-[8px] lg:border-gray-900 lg:shadow-2xl overflow-hidden"
+      exit={{ opacity: 0, y: 50 }}
+      className="fixed inset-0 z-[100] bg-black flex flex-col"
     >
+      <canvas ref={canvasRef} className="hidden" />
+
       {/* Header */}
-      <div className="p-6 flex items-center justify-between bg-black/50 backdrop-blur-md z-20">
-        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-          <CameraIcon className="w-6 h-6 text-cyan-400" />
-          AI 트래블 스캐너
-        </h2>
-        <button onClick={onClose} className="p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors">
-          <X className="w-6 h-6 text-white" />
+      <div className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-[110] pointer-events-none">
+        <button 
+          onClick={onClose}
+          className="bg-black/40 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/60 p-2 flex items-center justify-center transition-all active:scale-95"
+        >
+          <X className="w-6 h-6" />
         </button>
       </div>
 
-      {/* v49: OCR Engine Selector Toggle */}
-      <div className="flex justify-center py-2 bg-black/30 backdrop-blur-sm z-20">
-        <div className="flex items-center gap-1 bg-white/10 p-1 rounded-full border border-white/20">
-          <button 
-            onClick={() => { setProvider('azure'); setResults([]); }}
-            className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all duration-300 ${provider === 'azure' ? 'bg-blue-500 text-white shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'text-white/40 hover:text-white/60'}`}
-          >
-            Azure
-          </button>
-          <button 
-            onClick={() => { setProvider('google'); setResults([]); }}
-            className={`px-4 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all duration-300 ${provider === 'google' ? 'bg-[#4285F4] text-white shadow-[0_0_10px_rgba(66,133,244,0.5)]' : 'text-white/40 hover:text-white/60'}`}
-          >
-            Google
-          </button>
-        </div>
-      </div>
-
-      {/* Viewfinder Area */}
-      <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center p-4">
-        <div className="relative h-full w-full max-h-full overflow-hidden flex items-center justify-center">
-          {capturedImage ? (
-            /* [PRECISION ANCHORED WRAPPER] 
-               The container size MUST match the rendered image size in object-contain mode.
-            */
-            <div 
-              className="relative shadow-2xl rounded-lg overflow-hidden border border-white/10"
-              style={{
-                aspectRatio: `${imgAspectRatio}`,
-                width: imgAspectRatio > (3/4) ? '100%' : 'auto',
-                height: imgAspectRatio > (3/4) ? 'auto' : '100%',
-                maxHeight: '100%',
-                maxWidth: '100%'
-              }}
-            >
-               <img 
-                src={capturedImage} 
-                alt="Captured" 
-                className="w-full h-full block object-contain" // Changed to contain to avoid cropping alignment issues
-              />
-              
-              {/* Overlays - Now showing coordinates per representative's request (v40 Debug) */}
-              <div className="absolute inset-0 z-10 pointer-events-none">
-                {results.map((res, i) => (
-                  <div 
-                    key={i}
-                    className="absolute pointer-events-none z-50 flex items-center justify-center"
-                    style={{
-                      /* v59: Double-Wrapper Strategy: Force CSS translate for perfect centering regardless of Framer internal motions */
-                      left: `${res.boundingBox[0] + res.boundingBox[2]/2}%`,
-                      top: `${res.boundingBox[1] + res.boundingBox[3]/2}%`,
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                  >
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="w-fit h-fit flex items-center justify-center"
-                      style={{
-                        padding: '1px 2px',
-                        borderRadius: '2px',
-                        lineHeight: 1.0,
-                        textShadow: '1px 1px 2px rgba(0,0,0,0.8)'
-                      }}
-                    >
-                      <span className={`font-mono font-black text-center whitespace-nowrap leading-none ${
-                        res.laneIdx === 0 ? 'text-cyan-400' : 
-                        res.laneIdx === 1 ? 'text-orange-400' : 
-                        res.laneIdx === 2 ? 'text-purple-400' : 
-                        res.laneIdx === 3 ? 'text-green-400' : 
-                        'text-yellow-400'
-                      }`} style={{ fontSize: '10px' }}>
-                        {/* v58/v59/v60: Multi-Lane Comma-Anchor on Hierarchical X-Segmenter */}
-                        {(res.boundingBox[0] + res.boundingBox[2]/2).toFixed(1)},{(res.boundingBox[1] + res.boundingBox[3]/2).toFixed(1)}%
-                      </span>
-                    </motion.div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
+      {/* Main View */}
+      <div className="flex-1 relative flex flex-col items-center justify-center p-4 bg-neutral-900 overflow-hidden">
+        <div 
+          ref={containerRef}
+          className="relative w-full max-w-[430px] h-[75vh] shadow-[0_0_80px_rgba(0,0,0,0.8)] rounded-3xl overflow-hidden bg-black [container-type:size]" 
+          style={{ height: isCapturing ? '100%' : '75vh' }}
+        >
+          {isCapturing ? (
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
               className="w-full h-full object-cover"
             />
-          )}
-
-          {/* Scan Line Animation */}
-          {!isScanning && results.length === 0 && !capturedImage && (
-            <div className="absolute inset-0 border-2 border-cyan-400/30 pointer-events-none">
-              <motion.div 
-                animate={{ top: ['0%', '100%'] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                className="absolute left-0 right-0 h-1 bg-cyan-400 shadow-[0_0_20px_cyan]"
+          ) : (
+            imgSrc && (
+              <img 
+                ref={imgRef}
+                src={imgSrc} 
+                alt="Captured" 
+                className="w-full h-full object-contain"
+                onLoad={calculateOverlayRect}
               />
-            </div>
+            )
           )}
 
-          {/* Loading States & Errors omitted for brevity in write_to_file, but keeping essentials */}
           <AnimatePresence>
-            {isScanning && (
+            {isFlashActive && (
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 z-50"
-              >
-                <Loader2 className="w-12 h-12 text-cyan-400 animate-spin" />
-                <p className="text-white font-bold text-center">AI 분석 중... ✨</p>
-              </motion.div>
+                className="absolute inset-0 bg-white z-[120]"
+              />
             )}
           </AnimatePresence>
-        </div>
-      </div>
 
-      {/* Controls Container */}
-      <div className="p-8 pb-12 bg-black/90 border-t border-white/10 flex flex-col items-center gap-6">
-        <div className="flex items-center gap-8">
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="p-4 rounded-2xl bg-white/5 border border-white/10 text-white hover:bg-white/10"
-          >
-            <ImageIcon className="w-6 h-6" />
-          </button>
+          {showOverlays && imgDimensions && overlayStyle.renderedW && (
+            <div style={overlayStyle}>
+              {(() => {
+                // v285: 절대 픽셀 좌표 배율 계산 정밀성 향상 🎯 (소수점 6자리까지 확보)
+                const sourceW = imgRef.current?.naturalWidth || imgDimensions.width;
+                const sourceH = imgRef.current?.naturalHeight || imgDimensions.height;
+                const scaleX = overlayStyle.renderedW! / sourceW;
+                const scaleY = overlayStyle.renderedH! / sourceH;
 
-          <button 
-            onClick={capturedImage ? resetScanner : captureAndScan}
-            disabled={isScanning}
-            className="w-20 h-20 rounded-full bg-white flex items-center justify-center border-4 border-cyan-400 active:scale-95 transition-all"
-          >
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center">
-              {capturedImage ? <RotateCcw className="w-8 h-8 text-white" /> : <CameraIcon className="w-8 h-8 text-white" />}
+                return results.map((res: any, i: number) => {
+                  const [cx, cy, w, h] = res.bbox;
+                  
+                  return (
+                    <TranslationItem 
+                      key={i}
+                      id={i}
+                      text={res.original || res.text || res.translated}
+                      cx={cx}
+                      cy={cy}
+                      w={w}
+                      h={h}
+                      scaleX={scaleX}
+                      scaleY={scaleY}
+                      angle={res.angle}
+                      isVertical={res.isVertical} // v275: 세로형 레이아웃 정보 전달 ↕️
+                      // v200: 픽셀 기반 폰트 크기 계산 최적화 ✨📐
+                      fontSize={getProportionalFontSize(h * scaleY, { scale: 0.75, max: 64, min: 10 })}
+                      textColor="#ffffff"
+                      backgroundColor="transparent"
+                      fontWeight="bold"
+                      delay={i * 0.01 + 0.15}
+                    />
+                  );
+                });
+              })()}
             </div>
-          </button>
+          )}
 
-          <div className="w-14" />
+          {isProcessing && (
+            <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+              >
+                <RefreshCw className="w-12 h-12 text-cyan-400" />
+              </motion.div>
+              <p className="mt-4 text-white font-medium text-lg text-center px-4">AI가 예술적으로 번역 중이에요... 🎨✨</p>
+            </div>
+          )}
         </div>
-        <p className="text-gray-400 text-sm font-medium">
-          {capturedImage ? "다시 하려면 회전 버튼을!" : "카메라를 눌러 스캔하세요! ✨"}
-        </p>
       </div>
 
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileUpload} 
-        accept="image/*" 
-        className="hidden" 
-      />
+      {/* Footer Controls */}
+      <div className="px-6 pb-14 z-[110] bg-black/80 backdrop-blur-lg flex flex-col items-center">
+        
+        {!isCapturing && !isProcessing && imgSrc && (
+          <div className="mb-6 flex bg-white/10 backdrop-blur-md p-1 rounded-2xl border border-white/10 w-full max-w-[280px]">
+            <button 
+              onClick={() => setShowOverlays(false)}
+              className={`flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all ${!showOverlays ? 'bg-white text-black shadow-lg' : 'text-white/60 hover:text-white'}`}
+            >
+              원본보기
+            </button>
+            <button 
+              onClick={() => setShowOverlays(true)}
+              className={`flex-1 py-2 px-4 rounded-xl text-sm font-bold transition-all ${showOverlays ? 'bg-cyan-500 text-white shadow-lg' : 'text-white/60 hover:text-white'}`}
+            >
+              번역보기
+            </button>
+          </div>
+        )}
+
+        <div className="w-full flex justify-between items-center">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            className="hidden" 
+            accept="image/*" 
+            onChange={handleFileSelect} 
+          />
+
+          <button 
+            onClick={isCapturing ? triggerFileSelect : resetScanner} 
+            className="text-white/60 hover:text-white p-2 flex items-center justify-center transition-all active:scale-95"
+          >
+            {isCapturing ? (
+              <ImageIcon className="w-7 h-7" />
+            ) : (
+              <RotateCw className="w-7 h-7" />
+            )}
+          </button>
+
+          <div className="relative">
+            <motion.button 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={captureImage}
+              disabled={!isCapturing}
+              className={`w-20 h-20 rounded-full flex items-center justify-center p-1 border-4 ${isCapturing ? 'border-white' : 'border-white/20'}`}
+            >
+              <div className={`w-full h-full rounded-full ${isCapturing ? 'bg-white shadow-[0_0_20px_rgba(255,255,255,0.5)]' : 'bg-white/20'}`} />
+            </motion.button>
+            
+            {isCapturing && (
+              <motion.div 
+                initial={{ scale: 0 }}
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="absolute -top-1 -right-1 w-4 h-4 bg-cyan-500 rounded-full border-2 border-black"
+              />
+            )}
+          </div>
+
+          <button 
+            className="text-white/60 hover:text-white p-2 flex items-center justify-center transition-all active:scale-95"
+          >
+            <Maximize2 className="w-7 h-7" />
+          </button>
+        </div>
+      </div>
     </motion.div>
   );
 }
