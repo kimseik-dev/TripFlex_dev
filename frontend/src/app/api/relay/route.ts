@@ -221,11 +221,13 @@ function processAdaptiveMerging(anns: any[]) {
 
       // v330: 고밀도 세로 기둥 구역인 경우, 옆 글자가 아주 가깝지 않으면 세로 모드를 강제합니다! 🦒✨
       // (이미지 8번 처럼 칼럼이 나뉜 경우를 위한 전용 레이어입니다!)
-      if (isInsidePillar && nearest.dx > ref.bw * 0.4) {
+      // v360: '가로로 충분히 긴 단어(bw > bh * 1.8)'는 기둥 구역에 있더라도 세로 모드 강제에서 제외합니다! ↕️🚫
+      if (isInsidePillar && nearest.dx > ref.bw * 0.4 && ref.bw < ref.bh * 1.8) {
         isPreferVertical = true;
       }
     } else {
-      isPreferVertical = ref.bh > ref.bw * 1.5 || isInsidePillar;
+      // v360: 가로로 긴 단어는 단독으로 있어도 세로 모드를 지양합니다.
+      isPreferVertical = (ref.bh > ref.bw * 1.5) || (isInsidePillar && ref.bw < ref.bh * 1.4);
     }
 
     let rowIndices: number[] = [];
