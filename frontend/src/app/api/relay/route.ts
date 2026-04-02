@@ -249,13 +249,27 @@ function processAdaptiveMerging(anns: any[]) {
         .map(item => item.idx);
     } else {
       // 2-B. 가로 버킷(Row Bucket) 생성 ↔️🧺
+      // v410: '컬럼 경계 감지(Column Gap Protection)' ✨🚥
+      // 가로로 멀리 떨어진 단어(dx > bh * 4.0)는 같은 라인이라도 독립 컬럼으로 간주하여 병합하지 않음!
       rowIndices = remaining
-        .map((ann, idx) => ({ 
-          idx, 
-          distY: Math.abs((ann.by + ann.bh / 2) - refCenterY),
-          overlapY: Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by)
-        }))
-        .filter(item => item.distY < ref.bh * 0.7 || item.overlapY > Math.min(remaining[item.idx].bh, ref.bh) * 0.5)
+        .map((ann, idx) => {
+          const dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
+          const isNumericChain = refIsNumeric && isNumericOnly(ann.description);
+          return { 
+            idx, 
+            dx,
+            isNumericChain,
+            distY: Math.abs((ann.by + ann.bh / 2) - refCenterY),
+            overlapY: Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by)
+          };
+        })
+        .filter(item => {
+          const charH = Math.max(remaining[item.idx].bh, ref.bh);
+          // 숫자가 연속될 때는 더 엄격하게(3배), 일반 텍스트는 4.5배 이상의 공백이 있으면 컬럼 분리!
+          const gapLimit = item.isNumericChain ? charH * 3.0 : charH * 4.5;
+          const isVerticalNearby = item.distY < charH * 0.7 || item.overlapY > charH * 0.5;
+          return isVerticalNearby && item.dx < gapLimit;
+        })
         .map(item => item.idx);
     }
 
