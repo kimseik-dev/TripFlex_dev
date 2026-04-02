@@ -10,7 +10,7 @@ import {
   Image as ImageIcon
 } from 'lucide-react';
 import { TranslationItem } from './scanner/TranslationItem';
-import { calculatePushedTop, getProportionalFontSize } from '@/utils/scanner/layoutEngine';
+import { calculatePushedTop, getProportionalFontSize, calculateFontSizeToFit } from '@/utils/scanner/layoutEngine';
 import { extractDominantColors, ColorResult } from '@/utils/scanner/colorEngine';
 
 /**
@@ -336,8 +336,14 @@ export default function Scanner({ onClose }: ScannerProps) {
                       scaleY={scaleY}
                       angle={res.angle}
                       isVertical={res.isVertical} // v275: 세로형 레이아웃 정보 전달 ↕️
-                      // v200: 픽셀 기반 폰트 크기 계산 최적화 ✨📐
-                      fontSize={getProportionalFontSize(h * scaleY, { scale: 0.75, max: 64, min: 10 })}
+                      // v390: 텍스트 길이에 맞춰 박스 너비(w) 안에 딱 들어가게 폰트 크기 자동 조절! 📐↔️✨
+                      fontSize={calculateFontSizeToFit(
+                        res.translated || res.text || res.original, 
+                        w * scaleX, 
+                        h * scaleY, 
+                        res.isVertical,
+                        { max: 56, min: 10, padding: 0.9 }
+                      )}
                       textColor="#ffffff"
                       backgroundColor="transparent"
                       fontWeight="bold"
