@@ -199,40 +199,50 @@ function processAdaptiveMerging(anns: any[]) {
     const isInsidePillar = !isGlobalVerticalScarcity && !refIsNumeric && pillarZones.some(zoneX => Math.abs(refCenterX - zoneX) < 15);
     
     let isPreferVertical = false;
+    // v420: '가로 문장 우선권(Horizontal Sentence Priority)' 결정 🕵️‍♀️📖✨
+    // 주변에 가깝게 붙어있는 '가로 이웃'이 있다면, 세로 거리가 아무리 가까워도 가로 병합을 먼저 시도합니다.
+    let hasStrongHorizontalNeighbor = false;
     const candidates = remaining.filter(ann => ann !== ref);
     
     if (candidates.length > 0) {
-      const nearest = candidates.map(ann => {
+      const neighbors = candidates.map(ann => {
         let dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
         const dy = Math.max(0, ann.by - (ref.by + ref.bh), ref.by - (ann.by + ann.bh));
-        const xOverlap = Math.min(ann.bx + ann.bw, ref.bx + ref.bw) - Math.max(ann.bx, ref.bx);
         const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
-        
-        // v370/v375/v380/v400: '가로 중력' & '강력한 세로 저항' 🧲↔️🚫↕️
-        let dy_eff = dy;
-        if (refIsCJK || refIsNumeric || isCJK(ann.description)) {
-            dx *= 0.5;
-            // v400: 라틴어/숫자 문맥에서는 세로 패널티 4.0배로 극단적 강화!
+        return { ann, dx, dy, yOverlap };
+      });
+
+      // 가로로 많이 겹치거나(yOverlap) 매우 가까운(dx < bh * 3.5) 이웃이 있으면 가로 모드 강제!
+      hasStrongHorizontalNeighbor = neighbors.some(n => 
+        (n.yOverlap > ref.bh * 0.4 && n.dx < ref.bh * 3.5) || 
+        (n.dx < ref.bh * 0.5 && n.dy < ref.bh * 0.5)
+      );
+
+      const nearest = neighbors.map(n => {
+        let dx_eff = n.dx;
+        let dy_eff = n.dy;
+        if (refIsCJK || refIsNumeric || isCJK(n.ann.description)) {
+            dx_eff *= 0.5;
             dy_eff *= (refIsCJK ? 2.8 : 4.0); 
         }
-
-        return { ann, dx, dy: dy_eff, xOverlap, yOverlap, dist: Math.sqrt(dx*dx + dy_eff*dy_eff) };
+        return { ...n, dx_eff, dy_eff, dist: Math.sqrt(dx_eff*dx_eff + dy_eff*dy_eff) };
       }).sort((a, b) => a.dist - b.dist)[0];
 
-      if (nearest.yOverlap > nearest.ann.bh * 0.3 && nearest.dx < nearest.dy * 1.8) {
+      if (hasStrongHorizontalNeighbor && !isInsidePillar) {
         isPreferVertical = false;
-      } else if (nearest.xOverlap > nearest.ann.bw * 0.3 && nearest.dy < nearest.dx * 1.1) {
+      } else if (nearest.yOverlap > nearest.ann.bh * 0.3 && nearest.dx < nearest.dy * 1.8) {
+        isPreferVertical = false;
+      } else if (nearest.dy_eff < nearest.dx_eff * 1.1) {
         isPreferVertical = true;
       } else {
         isPreferVertical = ref.bh > ref.bw * 1.5;
       }
 
-      // v330/v360/v375: 기둥 구역 강제 모드 정밀화 - 숫자는 정밀 정렬된 기둥이 아니면 절대 세로로 묶지 않음.
-      if (isInsidePillar && nearest.dx > ref.bw * 0.4 && ref.bw < ref.bh * 1.8 && !refIsNumeric) {
+      if (isInsidePillar && !refIsNumeric) {
         isPreferVertical = true;
       }
     } else {
-      isPreferVertical = (ref.bh > ref.bw * 1.5) || (isInsidePillar && ref.bw < ref.bh * 1.4 && !refIsNumeric);
+      isPreferVertical = (ref.bh > ref.bw * 1.5) || (isInsidePillar && !refIsNumeric);
     }
 
     let rowIndices: number[] = [];
@@ -248,27 +258,22 @@ function processAdaptiveMerging(anns: any[]) {
         .filter(item => item.distX < ref.bw * 0.7 || item.overlapX > Math.min(remaining[item.idx].bw, ref.bw) * 0.5)
         .map(item => item.idx);
     } else {
-      // 2-B. 가로 버킷(Row Bucket) 생성 ↔️🧺
-      // v410: '컬럼 경계 감지(Column Gap Protection)' ✨🚥
-      // 가로로 멀리 떨어진 단어(dx > bh * 4.0)는 같은 라인이라도 독립 컬럼으로 간주하여 병합하지 않음!
+      // 2-B. 가로 버킷(Row Bucket) 생성 ↔️🧺 - v420: 더욱 탄탄한 문장 병합!
       rowIndices = remaining
         .map((ann, idx) => {
           const dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
+          const dy = Math.max(0, ann.by - (ref.by + ref.bh), ref.by - (ann.by + ann.bh));
+          const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
+          const distY = Math.abs((ann.by + ann.bh / 2) - refCenterY);
           const isNumericChain = refIsNumeric && isNumericOnly(ann.description);
-          return { 
-            idx, 
-            dx,
-            isNumericChain,
-            distY: Math.abs((ann.by + ann.bh / 2) - refCenterY),
-            overlapY: Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by)
-          };
+          return { idx, dx, dy, distY, yOverlap, isNumericChain };
         })
         .filter(item => {
           const charH = Math.max(remaining[item.idx].bh, ref.bh);
-          // 숫자가 연속될 때는 더 엄격하게(3배), 일반 텍스트는 4.5배 이상의 공백이 있으면 컬럼 분리!
-          const gapLimit = item.isNumericChain ? charH * 3.0 : charH * 4.5;
-          const isVerticalNearby = item.distY < charH * 0.7 || item.overlapY > charH * 0.5;
-          return isVerticalNearby && item.dx < gapLimit;
+          const gapLimit = item.isNumericChain ? charH * 3.0 : charH * 5.0;
+          // 같은 행에 있거나(yOverlap) 아주 가까운 경우 병합!
+          const isHorizontalNearby = item.yOverlap > charH * 0.3 || item.distY < charH * 0.5;
+          return isHorizontalNearby && item.dx < gapLimit;
         })
         .map(item => item.idx);
     }
