@@ -248,14 +248,20 @@ function processAdaptiveMerging(anns: any[]) {
     let rowIndices: number[] = [];
     
     if (isPreferVertical) {
-      // 2-A. 세로 버킷(Column Bucket) 생성 ↕️🧺
+      // 2-A. 세로 버킷(Column Bucket) 생성 ↕️🧺 - v430: 세로 방향 사회적 거리두기!
       rowIndices = remaining
         .map((ann, idx) => ({ 
           idx, 
           distX: Math.abs((ann.bx + ann.bw / 2) - refCenterX),
+          distY: Math.max(0, ann.by - (ref.by + ref.bh), ref.by - (ann.by + ann.bh)),
           overlapX: Math.min(ann.bx + ann.bw, ref.bx + ref.bw) - Math.max(ann.bx, ref.bx)
         }))
-        .filter(item => item.distX < ref.bw * 0.7 || item.overlapX > Math.min(remaining[item.idx].bw, ref.bw) * 0.5)
+        .filter(item => {
+          const charH = Math.max(remaining[item.idx].bh, ref.bh);
+          const isHorizontalNearby = item.distX < ref.bw * 0.7 || item.overlapX > Math.min(remaining[item.idx].bw, ref.bw) * 0.5;
+          // 세로로 너무 멀면(h * 1.5) 같은 기둥이라도 묶지 않음!
+          return isHorizontalNearby && item.distY < charH * 1.5;
+        })
         .map(item => item.idx);
     } else {
       // 2-B. 가로 버킷(Row Bucket) 생성 ↔️🧺 - v420: 더욱 탄탄한 문장 병합!
