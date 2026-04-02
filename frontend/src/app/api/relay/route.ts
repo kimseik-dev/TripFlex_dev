@@ -11,15 +11,14 @@ const logger = {
 };
 
 export async function POST(req: Request) {
+  const startTime = Date.now();
   try {
     const { image, country = 'JP' } = await req.json();
     
-    // v310: .env에서 소중한 열쇠(API 키)들을 읽어옵니다. 🔑✨
     const GOOGLE_API_KEY = (process.env.GOOGLE_VISION_API_KEY || '').trim();
     const relayUrl = (process.env.RELAY_SERVER_URL || '').trim();
     const bearerToken = (process.env.RELAY_BEARER_TOKEN || '').trim();
 
-    // v310: 구글 형님의 API 키가 서버에서 잘 읽히고 있는지 첫 5글자만 확인해볼까요? 🕵️‍♀️✨
     logger.api(`API KEY 로드 확인: ${GOOGLE_API_KEY ? GOOGLE_API_KEY.slice(0, 5) + '*****' : '❌ 비어있음'}`);
 
     if (!image) {
@@ -36,11 +35,9 @@ export async function POST(req: Request) {
     const base64Data = image.replace(/^data:image\/\w+;base64,/, "");
     const imgBuffer = Buffer.from(base64Data, "base64");
 
-    // 1. 이미지 크기 정밀 확정 📐
     const { width: finalWidth, height: finalHeight } = getImageDimensions(imgBuffer);
     logger.api(`좌표 기준 크기 정밀 확정 (v275 Adaptive System): ${finalWidth}x${finalHeight} 📐✨`);
 
-    // 2. Google Cloud Vision OCR 수행 👁️✨
     const googleUrl = `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_API_KEY}`;
     const googleRes = await fetch(googleUrl, {
         method: 'POST',
@@ -65,7 +62,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ message: 'No text detected', results: [] });
     }
 
-    // 3. Shared Relay API 호출 (선택 사항 - 실패해도 흐름 유지) 📤📦
     let relayData = null;
     if (relayUrl && bearerToken && !relayUrl.includes('your-')) {
         try {
@@ -76,7 +72,7 @@ export async function POST(req: Request) {
                     data: [{ imageId: `tripflex_${Date.now()}`, image: base64Data, annotations: textAnnotations }],
                     country: country
                 }),
-                signal: AbortSignal.timeout(5000) // 5초 타임아웃 추가 ⏱️
+                signal: AbortSignal.timeout(5000)
             });
             if (relayRes.ok) {
                 relayData = await relayRes.json();
@@ -89,7 +85,6 @@ export async function POST(req: Request) {
         }
     }
 
-    // 4. 지능형 적응형 병합 엔진 가동 (v311: Y축 정렬 및 세로 병합 임계값 강화! 🕵️‍♀️📐)
     const initialAnns = textAnnotations.slice(1).map((anno: any) => {
         const vertices = anno.boundingPoly?.vertices || [];
         const bx = Math.min(...vertices.map((v: any) => v.x || 0));
@@ -103,7 +98,6 @@ export async function POST(req: Request) {
     const rates = await getKRWRates();
     const relayAnns = relayData?.data?.[0]?.annotations || relayData?.annotations || [];
 
-    // 5. 번역 및 결과 매핑 🛣️🕵️‍♀️
     const finalResults = groups.map((g: any) => {
         const rawSegments = g.combinedText.split(g.isVertical ? "" : " ");
         
@@ -112,26 +106,46 @@ export async function POST(req: Request) {
             return (match && match.translatedText) ? match.translatedText.trim() : seg;
         });
 
-        // v315: 중복 제거 및 요약 로직 전면 제거! (각각의 위치에 각각의 텍스트를 1:1로 매칭합니다) 🎯✨
         let finalTranslated = translatedSegments.join(g.isVertical ? "" : " ");
         finalTranslated = fixMenuTranslation(finalTranslated);
         
         const krwPrice = convertPriceToKRW(g.combinedText, rates);
-        if (krwPrice) {
-            finalTranslated = `${finalTranslated} (약 ${krwPrice}원)`;
-        }
+        const postPriceStr = krwPrice ? `(약 ${krwPrice.toLocaleString()}원)` : "";
+        const isPrice = !!krwPrice;
 
         return {
             original: g.combinedText,
-            translated: finalTranslated,
+            translated: finalTranslated + (postPriceStr ? ` ${postPriceStr}` : ""),
+            description: finalTranslated, // v500: 업체의 'description' 규격 대응 ✨
             bbox: [g.cx, g.cy, g.width, g.height],
+            vertices: [ // v500: 업체의 'vertices' 규격 대응 (List of points) ✨
+                { x: g.cx - g.width / 2, y: g.cy - g.height / 2 },
+                { x: g.cx + g.width / 2, y: g.cy - g.height / 2 },
+                { x: g.cx + g.width / 2, y: g.cy + g.height / 2 },
+                { x: g.cx - g.width / 2, y: g.cy + g.height / 2 }
+            ],
+            isPrice: isPrice, // v500: 업체의 'isPrice' 규격 대응 ✨
+            postPrice: postPriceStr, // v500: 업체의 'postPrice' 규격 대응 ✨
+            orientation: g.isVertical ? 'vertical' : 'horizontal', // v500: 업체의 'orientation' 규격 대응 ✨
             laneIdx: 0,
             angle: 0,
             isVertical: g.isVertical
         };
     });
 
+    const processingTime = Date.now() - startTime;
+
+    // v500: 업체의 '전체 응답 스키마(status, model, data, message)' 규격 최종 래핑! 🕵️‍♀️🎯✨🌈
     return NextResponse.json({ 
+        status: "success",
+        model: "tripflex-adaptive-hybrid-v500",
+        data: [{
+            imageId: `tripflex_${Date.now()}`,
+            processingTime: processingTime,
+            annotations: finalResults
+        }],
+        message: "OK",
+        // 기존 프론트엔드 코드 호환을 위해 results 필드도 그대로 유지합니다! 😉
         results: finalResults, 
         imgWidth: finalWidth, 
         imgHeight: finalHeight, 
