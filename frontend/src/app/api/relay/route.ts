@@ -174,9 +174,10 @@ function processAdaptiveMerging(anns: any[]) {
     if (xBin >= 0 && xBin <= 100) xDensity[xBin] += weight;
   });
   
-  // v380: 전역 세로 지수(Global Verticality) 체크 🕵️‍♀️📊
+  // v380/v400: 전역 세로 지수(Global Verticality) 체크 🕵️‍♀️📊
   // 이미지 속에 '진짜 세로로 한 글자씩 있는 글자(bh > bw * 1.2)'가 거의 없다면 기둥 감지를 비활성화!
-  const verticalCount = anns.filter(a => a.bh > a.bw * 1.2).length;
+  // v400: 라틴어의 'I', 'l', '|' 등은 세로 글자 카운트에서 제외하여 오판 방지!
+  const verticalCount = anns.filter(a => a.bh > a.bw * 1.5 && a.description.length > 1).length;
   const isGlobalVerticalScarcity = verticalCount < Math.max(3, anns.length * 0.05);
 
   const avgDensity = anns.length / 100;
@@ -194,7 +195,7 @@ function processAdaptiveMerging(anns: any[]) {
     const refIsCJK = isCJK(ref.description);
     const refIsNumeric = isNumericOnly(ref.description);
     
-    // v380: 전역적으로 세로 글자가 부족하거나 숫자 조각이면 기둥 구역 판정에서 제외!
+    // v400: 숫자는 기둥 감지 구역이라도 세로로 묶지 않고 옆 메뉴명을 찾게 유도!
     const isInsidePillar = !isGlobalVerticalScarcity && !refIsNumeric && pillarZones.some(zoneX => Math.abs(refCenterX - zoneX) < 15);
     
     let isPreferVertical = false;
@@ -207,11 +208,12 @@ function processAdaptiveMerging(anns: any[]) {
         const xOverlap = Math.min(ann.bx + ann.bw, ref.bx + ref.bw) - Math.max(ann.bx, ref.bx);
         const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
         
-        // v370/v375/v380: '가로 중력(Horizontal Gravity)' & '세로 저항(Vertical Resistance)' 🧲↔️🚫↕️
+        // v370/v375/v380/v400: '가로 중력' & '강력한 세로 저항' 🧲↔️🚫↕️
         let dy_eff = dy;
         if (refIsCJK || refIsNumeric || isCJK(ann.description)) {
             dx *= 0.5;
-            dy_eff *= 2.8; // v380: 패널티를 2.8배로 강화하여 딤섬 수량 표시 철저 방어!
+            // v400: 라틴어/숫자 문맥에서는 세로 패널티 4.0배로 극단적 강화!
+            dy_eff *= (refIsCJK ? 2.8 : 4.0); 
         }
 
         return { ann, dx, dy: dy_eff, xOverlap, yOverlap, dist: Math.sqrt(dx*dx + dy_eff*dy_eff) };
