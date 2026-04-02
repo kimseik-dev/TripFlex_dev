@@ -161,21 +161,22 @@ function getImageDimensions(buffer: Buffer) {
 }
 
 function processAdaptiveMerging(anns: any[]) {
-  // v320: '적응형 방향 버킷(Adaptive Orientational Bucketing)' 시스템 ✨🌈
-  // 사용자의 이미지가 가로 메뉴인지 세로 메뉴인지 스스로 판단하여 버킷을 생성합니다. 🕵️‍♀️🧭
-  
+  // v370: Script-Aware Helper Functions 🕵️‍♀️🔍
+  const isCJK = (text: string) => /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\ud840-\ud87f\uac00-\ud7af]/.test(text);
+  const isNumericOnly = (text: string) => /^[\d\s\(\)\$€￥\.\-,]+$/.test(text);
+
   // v330: '고밀도 세로 기둥 사전 감지(Global Vertical Pillar Detection)' 🕵️‍♀️🦒✨
-  // 이미지 8번 같은 다중 컬럼 메뉴에서 '세로 기둥' 영역을 미리 파악합니다.
   const xDensity = new Array(101).fill(0);
   anns.forEach(ann => {
-    const xBin = Math.floor((ann.bx + ann.bw / 2) / 10); // 0~1000 기준 1% 단위
-    if (xBin >= 0 && xBin <= 100) xDensity[xBin]++;
+    const xBin = Math.floor((ann.bx + ann.bw / 2) / 10); 
+    // v370: 숫자/기호만 있는 조각은 기둥 밀도 기여도를 0.2로 낮춤 (허수 기둥 방지!) 🚫🦒
+    const weight = isNumericOnly(ann.description) ? 0.2 : 1.0;
+    if (xBin >= 0 && xBin <= 100) xDensity[xBin] += weight;
   });
   
-  // 평균 밀도보다 높은 곳을 '기둥 구역(Pillar Zone)'으로 정의!
   const avgDensity = anns.length / 100;
   const pillarZones = xDensity
-    .map((count, bin) => count > Math.max(2, avgDensity * 1.8) ? bin * 10 : -1)
+    .map((count, bin) => count > Math.max(2, avgDensity * 1.6) ? bin * 10 : -1)
     .filter(val => val !== -1);
 
   let remaining = [...anns].sort((a, b) => (a.by + a.bh / 2) - (b.by + b.bh / 2));
@@ -185,49 +186,44 @@ function processAdaptiveMerging(anns: any[]) {
     const ref = remaining[0];
     const refCenterX = ref.bx + ref.bw / 2;
     const refCenterY = ref.by + ref.bh / 2;
+    const refIsCJK = isCJK(ref.description);
+    const refIsNumeric = isNumericOnly(ref.description);
     
-    // v330: 현재 단어가 '세로 기둥' 구역에 사는지 확인! 🦒
     const isInsidePillar = pillarZones.some(zoneX => Math.abs(refCenterX - zoneX) < 15);
-    
-    // 1. 방향 판정 알고리즘 (Orientation Detection v325) 🧭
-    // 가장 가까운 이웃 단어가 어느 방향에 있는지를 보고 '가로 모드'와 '세로 모드'를 결정합니다. 🥊
     
     let isPreferVertical = false;
     const candidates = remaining.filter(ann => ann !== ref);
     
     if (candidates.length > 0) {
-      // 가장 가까운 이웃 찾기 🕵️‍♀️
       const nearest = candidates.map(ann => {
-        const dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
+        let dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
         const dy = Math.max(0, ann.by - (ref.by + ref.bh), ref.by - (ann.by + ann.bh));
-        // 가로/세로 겹침 정도 계산
         const xOverlap = Math.min(ann.bx + ann.bw, ref.bx + ref.bw) - Math.max(ann.bx, ref.bx);
         const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
         
+        // v370: '가로 중력(Horizontal Gravity)' 보정 🧲↔️
+        // CJK 텍스트거나 숫자 조각인 경우 가로 거리를 0.7배로 보정하여 옆으로 더 잘 붙게 함.
+        if (refIsCJK || refIsNumeric || isCJK(ann.description)) {
+            dx *= 0.7;
+        }
+
         return { ann, dx, dy, xOverlap, yOverlap, dist: Math.sqrt(dx*dx + dy*dy) };
       }).sort((a, b) => a.dist - b.dist)[0];
 
-      // 판정: '가랑거리'와 '세로거리' 중 어디가 더 가까운가? (가로 우선 가산점 부여 ✨)
       if (nearest.yOverlap > nearest.ann.bh * 0.3 && nearest.dx < nearest.dy * 1.5) {
-        // 옆에 글자가 더 가깝거나 비슷하게 있으면 '가로 모드'! ↔️
         isPreferVertical = false;
       } else if (nearest.xOverlap > nearest.ann.bw * 0.3 && nearest.dy < nearest.dx * 1.2) {
-        // 아래에 글자가 더 가깝게 있으면 '세로 모드'! ↕️
         isPreferVertical = true;
       } else {
-        // 근처에 아무도 없으면 글자 자체의 형상을 따릅니다.
         isPreferVertical = ref.bh > ref.bw * 1.5;
       }
 
-      // v330: 고밀도 세로 기둥 구역인 경우, 옆 글자가 아주 가깝지 않으면 세로 모드를 강제합니다! 🦒✨
-      // (이미지 8번 처럼 칼럼이 나뉜 경우를 위한 전용 레이어입니다!)
-      // v360: '가로로 충분히 긴 단어(bw > bh * 1.8)'는 기둥 구역에 있더라도 세로 모드 강제에서 제외합니다! ↕️🚫
-      if (isInsidePillar && nearest.dx > ref.bw * 0.4 && ref.bw < ref.bh * 1.8) {
+      // v330/v360: 기둥 구역 강제 모드 정밀화
+      if (isInsidePillar && nearest.dx > ref.bw * 0.4 && ref.bw < ref.bh * 1.8 && !refIsNumeric) {
         isPreferVertical = true;
       }
     } else {
-      // v360: 가로로 긴 단어는 단독으로 있어도 세로 모드를 지양합니다.
-      isPreferVertical = (ref.bh > ref.bw * 1.5) || (isInsidePillar && ref.bw < ref.bh * 1.4);
+      isPreferVertical = (ref.bh > ref.bw * 1.5) || (isInsidePillar && ref.bw < ref.bh * 1.4 && !refIsNumeric);
     }
 
     let rowIndices: number[] = [];
