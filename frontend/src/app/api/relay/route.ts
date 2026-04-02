@@ -201,24 +201,26 @@ function processAdaptiveMerging(anns: any[]) {
         const xOverlap = Math.min(ann.bx + ann.bw, ref.bx + ref.bw) - Math.max(ann.bx, ref.bx);
         const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
         
-        // v370: '가로 중력(Horizontal Gravity)' 보정 🧲↔️
-        // CJK 텍스트거나 숫자 조각인 경우 가로 거리를 0.7배로 보정하여 옆으로 더 잘 붙게 함.
+        // v370/v375: '가로 중력(Horizontal Gravity)' & '세로 저항(Vertical Resistance)' 🧲↔️🚫↕️
+        // CJK 텍스트거나 숫자 조각인 경우 가로 거리를 0.5배로 낮게, 세로 거리는 2.5배로 멀게 느껴지게 함!
+        let dy_eff = dy;
         if (refIsCJK || refIsNumeric || isCJK(ann.description)) {
-            dx *= 0.7;
+            dx *= 0.5;
+            dy_eff *= 2.5; 
         }
 
-        return { ann, dx, dy, xOverlap, yOverlap, dist: Math.sqrt(dx*dx + dy*dy) };
+        return { ann, dx, dy: dy_eff, xOverlap, yOverlap, dist: Math.sqrt(dx*dx + dy_eff*dy_eff) };
       }).sort((a, b) => a.dist - b.dist)[0];
 
-      if (nearest.yOverlap > nearest.ann.bh * 0.3 && nearest.dx < nearest.dy * 1.5) {
+      if (nearest.yOverlap > nearest.ann.bh * 0.3 && nearest.dx < nearest.dy * 1.8) {
         isPreferVertical = false;
-      } else if (nearest.xOverlap > nearest.ann.bw * 0.3 && nearest.dy < nearest.dx * 1.2) {
+      } else if (nearest.xOverlap > nearest.ann.bw * 0.3 && nearest.dy < nearest.dx * 1.1) {
         isPreferVertical = true;
       } else {
         isPreferVertical = ref.bh > ref.bw * 1.5;
       }
 
-      // v330/v360: 기둥 구역 강제 모드 정밀화
+      // v330/v360/v375: 기둥 구역 강제 모드 정밀화 - 숫자는 정밀 정렬된 기둥이 아니면 절대 세로로 묶지 않음.
       if (isInsidePillar && nearest.dx > ref.bw * 0.4 && ref.bw < ref.bh * 1.8 && !refIsNumeric) {
         isPreferVertical = true;
       }
