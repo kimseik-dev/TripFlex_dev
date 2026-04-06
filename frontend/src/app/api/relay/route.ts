@@ -110,19 +110,21 @@ export async function POST(req: Request) {
         finalTranslated = fixMenuTranslation(finalTranslated);
         
         const krwPrice = convertPriceToKRW(g.combinedText, rates);
-        const postPriceStr = krwPrice ? `(약 ${krwPrice.toLocaleString()}원)` : "";
+        // v500: 업체의 'postPrice' 설명 "가격에 해당하는 텍스트에 대한 후처리 결과 (가격이 아닌 경우 ""으로 표시됨)"에 맞춰,
+        // 단순하게 숫자만 포함된 문자열로 다듬습니다. (약...원) 같은 부가 설명은 뺍니다! 🕵️‍♀️📉✨
+        const postPriceStr = krwPrice ? String(krwPrice) : "";
         const isPrice = !!krwPrice;
 
         return {
             original: g.combinedText,
-            translated: finalTranslated + (postPriceStr ? ` ${postPriceStr}` : ""),
+            translated: finalTranslated + (postPriceStr ? ` (약 ${Number(postPriceStr).toLocaleString()}원)` : ""),
             description: finalTranslated, // v500: 업체의 'description' 규격 대응 ✨
             bbox: [g.cx, g.cy, g.width, g.height],
             vertices: [ // v500: 업체의 'vertices' 규격 대응 (List of points) ✨
-                { x: g.cx - g.width / 2, y: g.cy - g.height / 2 },
-                { x: g.cx + g.width / 2, y: g.cy - g.height / 2 },
-                { x: g.cx + g.width / 2, y: g.cy + g.height / 2 },
-                { x: g.cx - g.width / 2, y: g.cy + g.height / 2 }
+                { x: Math.round(g.cx - g.width / 2), y: Math.round(g.cy - g.height / 2) },
+                { x: Math.round(g.cx + g.width / 2), y: Math.round(g.cy - g.height / 2) },
+                { x: Math.round(g.cx + g.width / 2), y: Math.round(g.cy + g.height / 2) },
+                { x: Math.round(g.cx - g.width / 2), y: Math.round(g.cy + g.height / 2) }
             ],
             isPrice: isPrice, // v500: 업체의 'isPrice' 규격 대응 ✨
             postPrice: postPriceStr, // v500: 업체의 'postPrice' 규격 대응 ✨

@@ -30,6 +30,10 @@ export class AiService {
       });
 
       const annotation = response.data.responses?.[0]?.textAnnotations;
+      
+      // 대표님~ 여기 annotations 값 콘솔에 찍어드릴게요! 📸✨
+      this.logger.log('Raw Google Vision Annotations: ' + JSON.stringify(annotation, null, 2));
+
       if (!annotation || annotation.length === 0) {
         this.logger.warn('No text detected in the image. 🕵️‍♀️');
         return [];
