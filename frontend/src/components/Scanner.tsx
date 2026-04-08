@@ -31,6 +31,12 @@ export default function Scanner({ onClose }: ScannerProps) {
   const [colorMap, setColorMap] = useState<{ [key: number]: ColorResult }>({});
   const [showOverlays, setShowOverlays] = useState(false);
   const [isFlashActive, setIsFlashActive] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Array<{
+    name: string;
+    translated: string;
+    prices: Array<{ value: string; krw: string }>;
+  }>>([]);
+  const [showCart, setShowCart] = useState(false);
   
   const imgRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -216,6 +222,16 @@ export default function Scanner({ onClose }: ScannerProps) {
     console.log(`v272 Sync: Box[${Math.round(width)}x${Math.round(height)}] @ (${Math.round(overlayLeft)}, ${Math.round(overlayTop)}) | Scale: ${scale.toFixed(4)}`);
   };
 
+  // 이미지 컨테이너 크기가 바뀔 때마다(카트 패널 애니메이션 포함) 오버레이 재계산
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(() => {
+      calculateOverlayRect();
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [isCapturing, imgSrc]);
+
   useEffect(() => {
     if (!isCapturing && imgSrc) {
       window.addEventListener('resize', calculateOverlayRect);
@@ -227,12 +243,32 @@ export default function Scanner({ onClose }: ScannerProps) {
     }
   }, [isCapturing, imgSrc]);
 
+  const handleItemClick = (res: any) => {
+    if (res.isPrice) return;
+    const name = res.original || res.text || '';
+    setSelectedItems(prev => {
+      const exists = prev.findIndex(item => item.name === name);
+      if (exists >= 0) {
+        // 이미 담긴 항목이면 제거 (토글)
+        return prev.filter((_, i) => i !== exists);
+      }
+      return [...prev, {
+        name,
+        translated: res.description || res.translated || name,
+        prices: res.coupledPrices || [],
+      }];
+    });
+    setShowCart(true);
+  };
+
   const resetScanner = () => {
     setImgSrc(null);
     setResults([]);
     setImgDimensions(null);
     setColorMap({});
     setShowOverlays(false);
+    setSelectedItems([]);
+    setShowCart(false);
     setIsCapturing(true);
   };
 
@@ -322,12 +358,14 @@ export default function Scanner({ onClose }: ScannerProps) {
 
                 return results.map((res: any, i: number) => {
                   const [cx, cy, w, h] = res.bbox;
-                  
+                  const itemName = res.original || res.text || '';
+                  const isSelected = selectedItems.some(s => s.name === itemName);
+
                   return (
-                    <TranslationItem 
+                    <TranslationItem
                       key={i}
                       id={i}
-                      text={res.original || res.text || res.translated}
+                      text={itemName}
                       cx={cx}
                       cy={cy}
                       w={w}
@@ -335,12 +373,14 @@ export default function Scanner({ onClose }: ScannerProps) {
                       scaleX={scaleX}
                       scaleY={scaleY}
                       angle={res.angle}
-                      isVertical={res.isVertical} // v275: 세로형 레이아웃 정보 전달 ↕️
-                      // v390: 텍스트 길이에 맞춰 박스 너비(w) 안에 딱 들어가게 폰트 크기 자동 조절! 📐↔️✨
+                      isVertical={res.isVertical}
+                      isPrice={res.isPrice}
+                      isSelected={isSelected}
+                      onClick={!res.isPrice ? () => handleItemClick(res) : undefined}
                       fontSize={calculateFontSizeToFit(
-                        res.translated || res.text || res.original, 
-                        w * scaleX, 
-                        h * scaleY, 
+                        res.translated || res.text || res.original,
+                        w * scaleX,
+                        h * scaleY,
                         res.isVertical,
                         { max: 56, min: 10, padding: 0.9 }
                       )}
@@ -368,6 +408,49 @@ export default function Scanner({ onClose }: ScannerProps) {
           )}
         </div>
       </div>
+
+      {/* 담은 메뉴 리스트 패널 */}
+      <AnimatePresence>
+        {showCart && selectedItems.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="z-[110] bg-black/90 backdrop-blur-lg border-t border-white/10 overflow-hidden"
+          >
+            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+              <span className="text-white text-sm font-bold">담은 메뉴 ({selectedItems.length})</span>
+              <button
+                onClick={() => { setSelectedItems([]); setShowCart(false); }}
+                className="text-white/40 hover:text-white text-xs transition-colors"
+              >
+                전체 삭제
+              </button>
+            </div>
+            <div className="px-4 pb-3 flex flex-col gap-2 max-h-40 overflow-y-auto">
+              {selectedItems.map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2 border border-white/10">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{item.translated || item.name}</p>
+                    {item.prices.length > 0 && (
+                      <p className="text-yellow-300 text-xs mt-0.5">
+                        {item.prices.map(p => p.value).join(' / ')}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setSelectedItems(prev => prev.filter((_, i) => i !== idx))}
+                    className="ml-3 text-white/30 hover:text-white/80 text-sm transition-colors flex-shrink-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer Controls */}
       <div className="px-6 pb-14 z-[110] bg-black/80 backdrop-blur-lg flex flex-col items-center">

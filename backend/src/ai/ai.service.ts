@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class AiService {
@@ -9,17 +10,37 @@ export class AiService {
 
   constructor(private configService: ConfigService) {}
 
+  private isPrice(text: string): boolean {
+    const t = text.trim();
+    // 앞에 통화기호: € 22,00 / $ 9.50 / ¥ 500
+    if (/^[€$£¥₩]\s?\d+([.,]\d+)?\*?$/.test(t)) return true;
+    // 뒤에 통화기호: 22,00 € / 9.50 €
+    if (/^\d+([.,]\d+)?\s?[€$£¥₩]\*?$/.test(t)) return true;
+    // 기호 없이 숫자만: 9,50 / 13.50
+    if (/^\d+([.,]\d+)\*?$/.test(t)) return true;
+    return false;
+  }
+
+  private getOrientation(vertices: { x: number; y: number }[]): string {
+    if (vertices.length < 2) return 'horizontal';
+    const width = Math.abs((vertices[1]?.x || 0) - (vertices[0]?.x || 0));
+    const height = Math.abs((vertices[2]?.y || 0) - (vertices[0]?.y || 0));
+    return width >= height ? 'horizontal' : 'vertical';
+  }
+
   async processImage(imageBuffer: Buffer) {
+    const startTime = Date.now();
+
     try {
-      this.logger.log('Starting Google OCR process... 👁️✨');
+      this.logger.log('Starting Google OCR process...');
       const apiKey = this.configService.get<string>('GOOGLE_VISION_API_KEY');
-      
+
       if (!apiKey) {
-        throw new Error('Google Vision API Key is missing in environment! 🔑');
+        throw new Error('Google Vision API Key is missing in environment!');
       }
 
       const base64Image = imageBuffer.toString('base64');
-      
+
       const response = await axios.post(`${this.GOOGLE_VISION_URL}?key=${apiKey}`, {
         requests: [
           {
@@ -30,37 +51,59 @@ export class AiService {
       });
 
       const annotation = response.data.responses?.[0]?.textAnnotations;
-      
-      // 대표님~ 여기 annotations 값 콘솔에 찍어드릴게요! 📸✨
       this.logger.log('Raw Google Vision Annotations: ' + JSON.stringify(annotation, null, 2));
 
       if (!annotation || annotation.length === 0) {
-        this.logger.warn('No text detected in the image. 🕵️‍♀️');
-        return [];
+        this.logger.warn('No text detected in the image.');
+        return {
+          status: 'success',
+          model: 'google-cloud-vision',
+          data: [
+            {
+              imageId: uuidv4(),
+              processingTime: Date.now() - startTime,
+              annotations: [],
+            },
+          ],
+          message: 'No text detected in the image.',
+        };
       }
 
-      // v310: Google OCR 결과를 기존의 Azure 인터페이스에 맞춰 매핑합니다. 📐
-      // annotation[0]은 전체 텍스트이므로, 개별 단어 단위인 [1:]부터 처리합니다.
-      const textItems = annotation.slice(1).map((anno: any) => {
-        const vertices = anno.boundingPoly?.vertices || [];
+      // annotation[0]은 전체 텍스트이므로 개별 단어 단위인 [1:]부터 처리
+      const annotations = annotation.slice(1).map((anno: any) => {
+        const vertices: { x: number; y: number }[] = (anno.boundingPoly?.vertices || []).map(
+          (v: any) => ({ x: v.x || 0, y: v.y || 0 }),
+        );
+        const description: string = anno.description || '';
+        const priceFlag = this.isPrice(description);
+
         return {
-          text: anno.description || '',
-          // Azure boundingPolygon 형식을 흉내냅니다 (x, y 좌표 리스트)
-          boundingPolygon: vertices.flatMap((v: any) => [v.x || 0, v.y || 0]),
-          translatedText: '', // 추후 번역 로직 추가 가능
+          description,
+          vertices,
+          isPrice: priceFlag,
+          postPrice: priceFlag ? description : '',
+          orientation: this.getOrientation(vertices),
         };
       });
 
-      this.logger.log(`Found ${textItems.length} text items via Google Cloud Vision! ✅`);
-      
-      // 번역 로직 (v310 Restored!) - 구글은 OCR 결과에 기본 번역이 없으므로, 
-      // 필요시 Google Translate API를 추가로 호출해야 하지만, 현재는 원문 그대로 반환합니다.
-      // (Azure Translator를 대체할 로직이 필요하다면 여기에 추가)
-      return textItems;
+      this.logger.log(`Found ${annotations.length} text items via Google Cloud Vision!`);
+
+      return {
+        status: 'success',
+        model: 'google-cloud-vision',
+        data: [
+          {
+            imageId: uuidv4(),
+            processingTime: Date.now() - startTime,
+            annotations,
+          },
+        ],
+        message: `Successfully detected ${annotations.length} text items.`,
+      };
 
     } catch (error) {
       const errorMsg = error.response?.data?.error?.message || error.message;
-      this.logger.error(`Error processing image with Google Vision: ${errorMsg} ❌`);
+      this.logger.error(`Error processing image with Google Vision: ${errorMsg}`);
       throw new Error(`Google OCR Failed: ${errorMsg}`);
     }
   }

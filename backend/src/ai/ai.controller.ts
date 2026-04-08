@@ -14,10 +14,17 @@ export class AiController {
     }
 
     try {
-      const results = await this.aiService.processImage(file.buffer);
-      return { success: true, results };
+      return await this.aiService.processImage(file.buffer);
     } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        {
+          status: 'error',
+          model: 'google-cloud-vision',
+          data: [],
+          message: error.message,
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }

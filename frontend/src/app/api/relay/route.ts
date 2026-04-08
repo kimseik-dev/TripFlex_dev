@@ -110,10 +110,8 @@ export async function POST(req: Request) {
         finalTranslated = fixMenuTranslation(finalTranslated);
         
         const krwPrice = convertPriceToKRW(g.combinedText, rates);
-        // v500: 업체의 'postPrice' 설명 "가격에 해당하는 텍스트에 대한 후처리 결과 (가격이 아닌 경우 ""으로 표시됨)"에 맞춰,
-        // 단순하게 숫자만 포함된 문자열로 다듬습니다. (약...원) 같은 부가 설명은 뺍니다! 🕵️‍♀️📉✨
         const postPriceStr = krwPrice ? String(krwPrice) : "";
-        const isPrice = !!krwPrice;
+        const isPrice = !!krwPrice || isPriceText(g.combinedText);
 
         return {
             original: g.combinedText,
@@ -135,10 +133,28 @@ export async function POST(req: Request) {
         };
     });
 
+    // 메뉴-가격 커플링: 각 비가격 항목에 같은 행의 가격 항목을 연결
+    finalResults.forEach(item => {
+      if (item.isPrice) {
+        item.coupledPrices = [];
+        return;
+      }
+      const [cx, cy, , h] = item.bbox;
+      item.coupledPrices = finalResults
+        .filter(other => {
+          if (!other.isPrice) return false;
+          const [ocx, ocy, , oh] = other.bbox;
+          const rowThreshold = Math.max(h, oh) * 1.5;
+          return Math.abs(ocy - cy) < rowThreshold && ocx > cx;
+        })
+        .sort((a: any, b: any) => a.bbox[0] - b.bbox[0])
+        .map((p: any) => ({ value: p.original, krw: p.postPrice }));
+    });
+
     const processingTime = Date.now() - startTime;
 
     // v500: 업체의 '전체 응답 스키마(status, model, data, message)' 규격 최종 래핑! 🕵️‍♀️🎯✨🌈
-    return NextResponse.json({ 
+    return NextResponse.json({
         status: "success",
         model: "tripflex-adaptive-hybrid-v500",
         data: [{
@@ -361,7 +377,43 @@ function processAdaptiveMerging(anns: any[]) {
     });
   }
 
-  return groups;
+  // 후처리: 같은 행에서 구두점(, - | ;)으로 시작하는 그룹을 이전 그룹과 병합
+  // → "Weißburgunder" + ", nachhaltiger Anbau" → "Weißburgunder , nachhaltiger Anbau"
+  const merged: any[] = [];
+  for (const g of groups) {
+    const prev = merged[merged.length - 1];
+    if (prev && !g.isVertical && !prev.isVertical) {
+      const rowDiff = Math.abs(g.cy - prev.cy);
+      const maxH = Math.max(g.height, prev.height);
+      const horizGap = (g.cx - g.width / 2) - (prev.cx + prev.width / 2);
+      const startsWithPunct = /^[,\-|;]/.test(g.combinedText.trim());
+      // 이전 그룹이 가격처럼 생겼으면(€, $, 숫자로 시작) 병합하지 않음
+      const prevIsPrice = /^[€$£¥₩\d]/.test(prev.combinedText.trim());
+
+      if (rowDiff < maxH * 0.8 && startsWithPunct && !prevIsPrice && horizGap < maxH * 6) {
+        const minX = prev.cx - prev.width / 2;
+        const maxX = g.cx + g.width / 2;
+        prev.combinedText = prev.combinedText + ' ' + g.combinedText;
+        prev.cx = (minX + maxX) / 2;
+        prev.width = maxX - minX;
+        prev.height = Math.max(prev.height, g.height);
+        continue;
+      }
+    }
+    merged.push(g);
+  }
+  return merged;
+}
+
+function isPriceText(text: string): boolean {
+  const t = text.trim();
+  // 앞에 통화기호: € 22,00 / $ 9.50 / ¥ 500
+  if (/^[€$£¥₩]\s?\d+([.,]\d+)?\*?$/.test(t)) return true;
+  // 뒤에 통화기호: 22,00 € / 9.50 €
+  if (/^\d+([.,]\d+)?\s?[€$£¥₩]\*?$/.test(t)) return true;
+  // 기호 없이 숫자만: 9,50 / 13.50
+  if (/^\d+([.,]\d+)\*?$/.test(t)) return true;
+  return false;
 }
 
 async function getKRWRates() {
