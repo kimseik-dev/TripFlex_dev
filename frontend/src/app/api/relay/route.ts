@@ -378,8 +378,24 @@ function processAdaptiveMerging(anns: any[]) {
     });
   }
 
-  // 후처리: 같은 행에서 구두점(, - | ;)으로 시작하는 그룹을 이전 그룹과 병합
-  // → "Weißburgunder" + ", nachhaltiger Anbau" → "Weißburgunder , nachhaltiger Anbau"
+  // 후처리: 같은 행의 그룹 병합
+  // 1) 구두점(, - | ;)으로 시작하는 그룹 → 이전 그룹에 붙이기
+  // 2) 같은 행에서 둘 다 대문자로 시작하는 non-price 텍스트 → "GRAN" + "FILTRO DARK ROAST" → "GRAN FILTRO DARK ROAST"
+  const isPriceLike = (t: string) => {
+    const s = t.trim();
+    if (/^[€$£¥₩]/.test(s)) return true;
+    if (/^(\d+[.,]\d+\s?\*?\s+)+\d+[.,]\d+\s?\*?$/.test(s)) return true;
+    if (/^\d+[.,]\d+\s?\*?$/.test(s)) return true;
+    return false;
+  };
+
+  // 같은 행 그룹을 X축 순서대로 정렬 → "GRAN"이 "FILTRO DARK ROAST"보다 앞에 오도록
+  groups.sort((a, b) => {
+    const avgH = (a.height + b.height) / 2;
+    if (Math.abs(a.cy - b.cy) < avgH * 0.8) return a.cx - b.cx; // 같은 행: X 오름차순
+    return a.cy - b.cy; // 다른 행: Y 오름차순
+  });
+
   const merged: any[] = [];
   for (const g of groups) {
     const prev = merged[merged.length - 1];
@@ -388,10 +404,17 @@ function processAdaptiveMerging(anns: any[]) {
       const maxH = Math.max(g.height, prev.height);
       const horizGap = (g.cx - g.width / 2) - (prev.cx + prev.width / 2);
       const startsWithPunct = /^[,\-|;]/.test(g.combinedText.trim());
-      // 이전 그룹이 가격처럼 생겼으면(€, $, 숫자로 시작) 병합하지 않음
-      const prevIsPrice = /^[€$£¥₩\d]/.test(prev.combinedText.trim());
+      const prevIsPrice = isPriceLike(prev.combinedText);
+      const currIsPrice = isPriceLike(g.combinedText);
+      // 두 그룹 모두 대문자로 시작하는 메뉴명 텍스트인지 확인 (watermark 등 소문자 텍스트 방지)
+      const bothUppercase = /^[A-Z]/.test(prev.combinedText.trim()) && /^[A-Z]/.test(g.combinedText.trim());
 
-      if (rowDiff < maxH * 0.8 && startsWithPunct && !prevIsPrice && horizGap < maxH * 6) {
+      // 케이스 1: 구두점 시작 병합 (기존 로직)
+      const mergeByPunct = rowDiff < maxH * 0.8 && startsWithPunct && !prevIsPrice && horizGap < maxH * 6;
+      // 케이스 2: 같은 행 대문자 non-price 텍스트 병합 (GRAN + FILTRO DARK ROAST 등)
+      const mergeByRow = rowDiff < maxH * 0.8 && bothUppercase && !prevIsPrice && !currIsPrice && horizGap > 0 && horizGap < maxH * 6;
+
+      if (mergeByPunct || mergeByRow) {
         const minX = prev.cx - prev.width / 2;
         const maxX = g.cx + g.width / 2;
         prev.combinedText = prev.combinedText + ' ' + g.combinedText;
@@ -412,11 +435,11 @@ function isPriceText(text: string): boolean {
   if (/^[€$£¥₩]\s?\d+([.,]\d+)?\*?$/.test(t)) return true;
   // 뒤에 통화기호: 22,00 € / 9.50 €
   if (/^\d+([.,]\d+)?\s?[€$£¥₩]\*?$/.test(t)) return true;
-  // 기호 없이 숫자만: 9,50 / 13.50
-  if (/^\d+([.,]\d+)\*?$/.test(t)) return true;
-  // 복수 가격(같은 행 병합): "2.50 3.50" / "3.50 4.10 4.50" / "1.85 2.05 2.25*"
+  // 기호 없이 숫자만: 9,50 / 13.50 / 2.25 *
+  if (/^\d+([.,]\d+)\s?\*?$/.test(t)) return true;
+  // 복수 가격(같은 행 병합): "2.50 3.50" / "3.50 4.10 4.50" / "1.85 2.05 2.25 *"
   // SINGLE/DOUBLE 또는 SMALL/MEDIUM/LARGE 열 구조에서 가격들이 합쳐진 경우
-  if (/^(\d+[.,]\d+\*?\s+)+\d+[.,]\d+\*?$/.test(t)) return true;
+  if (/^(\d+[.,]\d+\s?\*?\s+)+\d+[.,]\d+\s?\*?$/.test(t)) return true;
   return false;
 }
 
