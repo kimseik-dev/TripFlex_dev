@@ -238,7 +238,7 @@ function processAdaptiveMerging(anns: any[]) {
     
     if (candidates.length > 0) {
       const neighbors = candidates.map(ann => {
-        let dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
+        const dx = Math.max(0, ann.bx - (ref.bx + ref.bw), ref.bx - (ann.bx + ann.bw));
         const dy = Math.max(0, ann.by - (ref.by + ref.bh), ref.by - (ann.by + ann.bh));
         const yOverlap = Math.min(ann.by + ann.bh, ref.by + ref.bh) - Math.max(ann.by, ref.by);
         return { ann, dx, dy, yOverlap };

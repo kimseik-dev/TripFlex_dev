@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Camera, 
@@ -46,9 +46,10 @@ export default function Scanner({ onClose }: ScannerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (isCapturing && videoRef.current) {
-      navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+    const video = videoRef.current;
+    if (isCapturing && video) {
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       })
       .then(stream => {
         if (videoRef.current) {
@@ -57,10 +58,10 @@ export default function Scanner({ onClose }: ScannerProps) {
       })
       .catch(err => console.error("Camera access failed:", err));
     }
-    
+
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
+      if (video && video.srcObject) {
+        const stream = video.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
     };
@@ -187,7 +188,7 @@ export default function Scanner({ onClose }: ScannerProps) {
 
   // v272: 'Perfect Fit' object-contain scaling engine 🕵️‍♀️📏✨
   // 브라우저의 object-contain 알고리즘과 1:1로 일치하는 계산식을 사용하여 오차를 원천 차단합니다.
-  const calculateOverlayRect = () => {
+  const calculateOverlayRect = useCallback(() => {
     if (!imgRef.current || !containerRef.current) return;
     const rect = imgRef.current.getBoundingClientRect();
     const containerRect = containerRef.current.getBoundingClientRect();
@@ -220,7 +221,7 @@ export default function Scanner({ onClose }: ScannerProps) {
     });
     
     console.log(`v272 Sync: Box[${Math.round(width)}x${Math.round(height)}] @ (${Math.round(overlayLeft)}, ${Math.round(overlayTop)}) | Scale: ${scale.toFixed(4)}`);
-  };
+  }, [imgDimensions]);
 
   // 이미지 컨테이너 크기가 바뀔 때마다(카트 패널 애니메이션 포함) 오버레이 재계산
   useEffect(() => {
@@ -230,7 +231,7 @@ export default function Scanner({ onClose }: ScannerProps) {
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [isCapturing, imgSrc]);
+  }, [isCapturing, imgSrc, calculateOverlayRect]);
 
   useEffect(() => {
     if (!isCapturing && imgSrc) {
@@ -241,7 +242,7 @@ export default function Scanner({ onClose }: ScannerProps) {
         clearTimeout(timer);
       };
     }
-  }, [isCapturing, imgSrc]);
+  }, [isCapturing, imgSrc, calculateOverlayRect]);
 
   const handleItemClick = (res: any) => {
     if (res.isPrice) return;
