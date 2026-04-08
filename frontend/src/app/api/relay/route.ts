@@ -414,6 +414,9 @@ function isPriceText(text: string): boolean {
   if (/^\d+([.,]\d+)?\s?[€$£¥₩]\*?$/.test(t)) return true;
   // 기호 없이 숫자만: 9,50 / 13.50
   if (/^\d+([.,]\d+)\*?$/.test(t)) return true;
+  // 복수 가격(같은 행 병합): "2.50 3.50" / "3.50 4.10 4.50" / "1.85 2.05 2.25*"
+  // SINGLE/DOUBLE 또는 SMALL/MEDIUM/LARGE 열 구조에서 가격들이 합쳐진 경우
+  if (/^(\d+[.,]\d+\*?\s+)+\d+[.,]\d+\*?$/.test(t)) return true;
   return false;
 }
 
