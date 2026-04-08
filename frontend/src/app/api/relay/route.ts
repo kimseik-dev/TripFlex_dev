@@ -129,7 +129,8 @@ export async function POST(req: Request) {
             orientation: g.isVertical ? 'vertical' : 'horizontal', // v500: 업체의 'orientation' 규격 대응 ✨
             laneIdx: 0,
             angle: 0,
-            isVertical: g.isVertical
+            isVertical: g.isVertical,
+            coupledPrices: [] as Array<{ value: string; krw: string }>,
         };
     });
 
